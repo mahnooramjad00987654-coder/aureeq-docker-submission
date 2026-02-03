@@ -8,13 +8,15 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     build-essential \
     curl \
+    python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the requirements file into the container
 COPY model_training/scripts/requirements.txt .
 
-# Install any needed packages specified in requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+# Upgrade pip and install packages
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the backend code and data
 # We need to preserve the relative structure for data loading
