@@ -1,6 +1,5 @@
 services:
   backend:
-    image: aureeq-backend:latest
     build:
       context: .
       dockerfile: model_training/scripts/Dockerfile
@@ -16,7 +15,6 @@ services:
       - ./model_training/vector_store_examples:/app/model_training/vector_store_examples
 
   frontend:
-    image: aureeq-frontend:latest
     build:
       context: .
       dockerfile: frontend/Dockerfile
