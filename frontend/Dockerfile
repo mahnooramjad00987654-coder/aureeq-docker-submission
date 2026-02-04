@@ -1,4 +1,4 @@
-# Use Node.js base image
+# Use Node.js base image for building
 FROM node:20-slim AS build
 
 # Set working directory
@@ -13,22 +13,20 @@ RUN npm install
 # Copy the rest of the frontend code
 COPY frontend/ .
 
-# Build the application
+# Build the project
 RUN npm run build
 
-# Use a lightweight server to serve the build artifacts
-FROM node:20-slim
+# Use Nginx for serving the build
+FROM nginx:stable-alpine
 
-WORKDIR /app
+# Copy the custom nginx configuration
+COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
 
-# Install 'serve' package
-RUN npm install -g serve
+# Copy build files from the build stage
+COPY --from=build /app/dist /usr/share/nginx/html
 
-# Copy build artifacts from the build stage
-COPY --from=build /app/dist /app/dist
-
-# Expose port 5173 (standard for this project based on README)
+# Expose the port Nginx is listening on
 EXPOSE 5173
 
-# Serve the application
-CMD ["serve", "-s", "dist", "-l", "5173"]
+# Start Nginx
+CMD ["nginx", "-g", "daemon off;"]
