@@ -122,6 +122,24 @@ except Exception as e:
 
 # --- Local Ollama Configuration ---
 
+# Startup Connectivity Check
+print(f"Checking Ollama connectivity at: {os.getenv('OLLAMA_HOST', 'http://localhost:11434')}")
+async def check_ollama():
+    try:
+        import httpx
+        ollama_url = os.getenv('OLLAMA_HOST', 'http://localhost:11434')
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(ollama_url)
+            if resp.status_code == 200:
+                print("✅ Successfully connected to Ollama!")
+            else:
+                print(f"⚠️ Ollama returned status {resp.status_code}")
+    except Exception as e:
+        print(f"❌ Failed to connect to Ollama: {e}")
+        print("💡 TIP: Make sure Ollama is RUNNING and Ollama is set to allow cross-origin requests.")
+
+asyncio.run(check_ollama())
+
 def get_llm():
     """Factory to create Local LLM instance."""
     ollama_base_url = os.getenv("OLLAMA_HOST", "http://localhost:11434")
@@ -267,20 +285,22 @@ REMEMBER:
 def get_relevant_examples(query: str, k: int = 3):
     """Retrieve top k similar examples for the query."""
     if not example_store:
+        print("DEBUG: Example store NOT LOADED. Skipping RAG.")
         return ""
     
     try:
+        print(f"DEBUG: Starting similarity search for query: {query[:50]}...")
         # Similarity search returns Document objects
         results = example_store.similarity_search(query, k=k)
+        print(f"DEBUG: Similarity search finished. Results found: {len(results)}")
         formatted_examples = ""
         for i, doc in enumerate(results):
              # We stored "full_example" in metadata during ingestion
-             # If metadata is missing, fallback to page_content (which is just user query)
              ex_text = doc.metadata.get("full_example", doc.page_content)
              formatted_examples += f"{ex_text}\n\n"
         return formatted_examples.strip()
     except Exception as e:
-        print(f"Example retrieval failed: {e}")
+        print(f"ERROR: Example retrieval failed: {e}")
         traceback.print_exc()
         return ""
 
@@ -312,6 +332,7 @@ async def generate_response(prompt_messages, user_input_text):
         
         async for chunk in llm_instance.astream(prompt_messages):
             if chunk.content:
+                print(f"DEBUG: Yielding chunk: {chunk.content[:20]}...")
                 yield chunk.content
                  
     except Exception as e:

@@ -8,3 +8,4 @@ edge-tts
 requests
 pydantic
 chromadb
+httpx
