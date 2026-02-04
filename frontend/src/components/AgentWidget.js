@@ -310,7 +310,8 @@ export function setupAgentInteraction(avatarRenderer) {
             });
             const ttsData = await ttsRes.json();
             if (ttsData.audio_url) {
-              avatarRenderer.speak(`${API_BASE_URL}${ttsData.audio_url}`);
+              const fullAudioUrl = ttsData.audio_url.startsWith('http') ? ttsData.audio_url : `${API_BASE_URL}${ttsData.audio_url}`;
+              avatarRenderer.speakFromUrl(fullAudioUrl);
             }
           } catch (e) {
             console.error("TTS Error:", e);
@@ -438,11 +439,9 @@ export function setupAgentInteraction(avatarRenderer) {
         audio.play().catch(e => console.error("Auto-play failed:", e));
 
         // Lip-sync if avatar is present
-        if (window.avatarFunctions && window.avatarFunctions.speak) {
-          // For Vrm, we might need a separate way to trigger lip sync accurately with the file
-          // For now, simpler audio play is a good first step. 
-          // If the avatar expects an audio buffer or URL for lip sync:
-          window.avatarFunctions.speak(data.audio_url);
+        if (window.avatarFunctions && window.avatarFunctions.speakFromUrl) {
+          const fullWelcomeUrl = data.audio_url.startsWith('http') ? data.audio_url : `${API_BASE_URL}${data.audio_url}`;
+          window.avatarFunctions.speakFromUrl(fullWelcomeUrl);
         }
       }
     } catch (e) {

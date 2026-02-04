@@ -105,10 +105,14 @@ except Exception as e:
 # Load Sales Examples Vector Store
 print("Loading Sales Examples Vector Store...")
 try:
-    embeddings = OllamaEmbeddings(model="nomic-embed-text")
+    ollama_base_url = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    embeddings = OllamaEmbeddings(
+        model="nomic-embed-text",
+        base_url=ollama_base_url
+    )
     if os.path.exists(EXAMPLES_DB_DIR):
         example_store = Chroma(persist_directory=EXAMPLES_DB_DIR, embedding_function=embeddings)
-        print("Sales Examples Store Loaded Successfully.")
+        print(f"Sales Examples Store Loaded (Ollama: {ollama_base_url})")
     else:
         print("Sales Examples Store NOT FOUND. Run ingest_examples.py first.")
         example_store = None
@@ -120,8 +124,10 @@ except Exception as e:
 
 def get_llm():
     """Factory to create Local LLM instance."""
+    ollama_base_url = os.getenv("OLLAMA_HOST", "http://localhost:11434")
     return ChatOllama(
         model=MODEL_NAME, 
+        base_url=ollama_base_url,
         keep_alive="24h",
         num_ctx=8192,  # Increased for full menu + RAG context
         num_predict=256,  # Increased allow for longer, more detailed responses

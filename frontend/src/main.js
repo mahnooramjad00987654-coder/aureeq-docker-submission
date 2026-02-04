@@ -22,6 +22,10 @@ function render() {
 
         // Setup Chat & Voice Interaction
         import('./components/AgentWidget').then(({ setupAgentInteraction }) => {
+          // Export functions for AgentWidget to use
+          window.avatarFunctions = {
+            speakFromUrl: (url) => renderer.speakFromUrl(url)
+          };
           setupAgentInteraction(renderer);
         });
       });
