@@ -310,26 +310,9 @@ async def generate_response(prompt_messages, user_input_text):
         print(f"Connecting to Ollama at: {ollama_base_url} with model: {MODEL_NAME}")
         llm_instance = get_llm()
         
-        # Buffer to ensure sentence completion
-        buffer = ""
-        sentence_endings = ('.', '!', '?', '."', '!"', '?"')
-        
         async for chunk in llm_instance.astream(prompt_messages):
-            content = chunk.content
-            buffer += content
-            
-            # Check if we have a complete sentence
-            if any(buffer.rstrip().endswith(ending) for ending in sentence_endings):
-                yield buffer
-                buffer = ""
-            # If buffer is getting long without sentence end, yield it anyway
-            elif len(buffer) > 200:
-                yield buffer
-                buffer = ""
-        
-        # Yield any remaining content
-        if buffer:
-            yield buffer
+            if chunk.content:
+                yield chunk.content
                  
     except Exception as e:
         print(f"CRITICAL Model generation failed: {e}")
