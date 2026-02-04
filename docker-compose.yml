@@ -19,6 +19,6 @@ services:
       context: .
       dockerfile: frontend/Dockerfile
     ports:
-      - "5173:5173"
+      - "80:5173" # Mapping VPS port 80 to container 5173
     depends_on:
       - backend
