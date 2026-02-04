@@ -11,6 +11,32 @@ Aureeq is an intelligent, voice-activated AI sales assistant designed for **IYI 
   - **Edge TTS** for voice synthesis.
 - **data/**: Contains menu data, voice samples, and vector store artifacts.
 
+## 🐳 One-Click Docker Deployment (Recommended)
+
+This project is fully containerized. You can deploy it on any machine with Docker installed.
+
+### 1. Build & Start
+```bash
+docker-compose up -d --build
+```
+*App will be available at http://localhost:5173*
+
+### 2. Download AI Models (First-Time Only)
+The AI engine (Ollama) is integrated. Run these commands once to download the brains:
+```bash
+# Download the LLM
+docker exec -it ollama ollama pull llama3.1:8b
+
+# Download the Embeddings model
+docker exec -it ollama ollama pull nomic-embed-text
+```
+
+## 🛠️ Internal Workflow
+- **Frontend**: Vite + Tailwind + Three.js (3.1 VRM Avatar).
+- **Backend**: FastAPI + LangChain + ChromaDB.
+- **AI Engine**: Ollama (Llama 3.1) running in a dedicated container.
+- **Voice**: Edge TTS (Standard synthesis for high reliability).
+
 ## Quick Start
 
 ### 1. Backend (Python)
