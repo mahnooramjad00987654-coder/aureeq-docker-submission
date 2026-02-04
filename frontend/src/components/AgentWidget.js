@@ -290,18 +290,23 @@ export function setupAgentInteraction(avatarRenderer) {
         return;
       }
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      contentEl.innerText = "";
+      try {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        contentEl.innerText = "";
 
-      let fullText = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value);
-        fullText += chunk;
-        contentEl.innerText = fullText.trimStart();
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        let fullText = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value);
+          fullText += chunk;
+          contentEl.innerText = fullText.trimStart();
+          messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+      } catch (streamError) {
+        console.error("Stream interrupted:", streamError);
+        contentEl.innerText += "\n[Connection interrupted. Please try again.]";
       }
 
       // Trigger TTS?
@@ -364,35 +369,40 @@ export function setupAgentInteraction(avatarRenderer) {
     return rec;
   };
 
-  micBtn.onclick = () => {
+  micBtn.onclick = async () => {
     // 1. If currently recording -> STOP and SEND
     if (isRecording) {
-      if (recognition) recognition.stop();
-      isRecording = false;
-      micBtn.classList.remove('bg-red-500', 'animate-pulse');
-      micIcon.innerHTML = '<path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 3.01-2.55 5.5-5.5 5.5S6 14.01 6 11H4c0 3.53 2.61 6.43 6 6.92V21h4v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>'; // Mic Icon
+      if (recognition) {
+        recognition.stop();
+        // Force an update to the input with any final speech
+        isRecording = false;
+        micBtn.classList.remove('bg-red-500', 'animate-pulse');
+        micIcon.innerHTML = '<path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 3.01-2.55 5.5-5.5 5.5S6 14.01 6 11H4c0 3.53 2.61 6.43 6 6.92V21h4v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>'; // Mic Icon
 
-      // Auto-send after short delay to let final transcript settle
-      setTimeout(() => {
-        if (input.value.trim().length > 0) handleSend();
-      }, 500);
-
+        // Auto-send after a small delay to catch the last word
+        setTimeout(() => {
+          if (input.value.trim().length > 0) handleSend();
+        }, 600);
+      }
     } else {
       // 2. If NOT recording -> ASK PERMISSION & START
-      if (!recognition) recognition = initRecognition();
-      if (recognition) {
-        try {
+      try {
+        // Explicitly request mic permission first as requested
+        await navigator.mediaDevices.getUserMedia({ audio: true });
+
+        if (!recognition) recognition = initRecognition();
+        if (recognition) {
           recognition.start();
           isRecording = true;
           micBtn.classList.add('bg-red-500', 'animate-pulse');
           // Change icon to Square (Stop)
           micIcon.innerHTML = '<rect x="6" y="6" width="12" height="12" />';
-        } catch (e) {
-          console.error("Mic Error:", e);
-          alert("Could not access microphone.");
+        } else {
+          alert("Speech Recognition not supported in this browser.");
         }
-      } else {
-        alert("Speech Recognition not supported in this browser.");
+      } catch (e) {
+        console.error("Mic Permission Denied or Error:", e);
+        alert("Microphone permission is required to use voice input.");
       }
     }
   };

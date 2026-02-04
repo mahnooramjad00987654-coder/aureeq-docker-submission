@@ -319,8 +319,6 @@ async def generate_response(prompt_messages, user_input_text):
         traceback.print_exc()
         yield "I apologize, but I am currently experiencing technical difficulties. (Root cause: Connection to AI model failed)"
 
-        yield "I apologize, but I am currently experiencing technical difficulties."
-
 
 @app.post("/api/chat")
 async def chat_endpoint(request: ChatRequest):
@@ -357,7 +355,10 @@ async def chat_endpoint(request: ChatRequest):
     print(f"Prompt length: {len(combined_prompt)}")
     
     # Stream the response content directly to the client
-    return StreamingResponse(generate_response(prompt_messages, user_query), media_type="text/plain")
+    return StreamingResponse(
+        generate_response(prompt_messages, user_query), 
+        media_type="text/event-stream"
+    )
 
 # --- Other Endpoints ---
 
