@@ -358,14 +358,25 @@ export function setupAgentInteraction(avatarRenderer) {
     const rec = new SpeechRecognition();
     rec.continuous = true;
     rec.interimResults = true;
+    rec.lang = 'en-US';
+
     rec.onresult = (e) => {
-      let transcript = '';
-      for (let i = e.resultIndex; i < e.results.length; ++i) {
-        transcript += e.results[i][0].transcript;
+      let fullTranscript = '';
+      for (let i = 0; i < e.results.length; ++i) {
+        fullTranscript += e.results[i][0].transcript;
       }
-      input.value = transcript;
+      input.value = fullTranscript;
       isVoiceInputSource = true;
     };
+
+    rec.onend = () => {
+      if (isRecording) {
+        isRecording = false;
+        micBtn.classList.remove('bg-red-500', 'animate-pulse');
+        micIcon.innerHTML = '<path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 3.01-2.55 5.5-5.5 5.5S6 14.01 6 11H4c0 3.53 2.61 6.43 6 6.92V21h4v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>';
+      }
+    };
+
     return rec;
   };
 
@@ -374,7 +385,6 @@ export function setupAgentInteraction(avatarRenderer) {
     if (isRecording) {
       if (recognition) {
         recognition.stop();
-        // Force an update to the input with any final speech
         isRecording = false;
         micBtn.classList.remove('bg-red-500', 'animate-pulse');
         micIcon.innerHTML = '<path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 3.01-2.55 5.5-5.5 5.5S6 14.01 6 11H4c0 3.53 2.61 6.43 6 6.92V21h4v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>'; // Mic Icon
@@ -382,16 +392,16 @@ export function setupAgentInteraction(avatarRenderer) {
         // Auto-send after a small delay to catch the last word
         setTimeout(() => {
           if (input.value.trim().length > 0) handleSend();
-        }, 600);
+        }, 300);
       }
     } else {
       // 2. If NOT recording -> ASK PERMISSION & START
       try {
-        // Explicitly request mic permission first as requested
         await navigator.mediaDevices.getUserMedia({ audio: true });
 
         if (!recognition) recognition = initRecognition();
         if (recognition) {
+          input.value = ''; // Clear previous text for a fresh start
           recognition.start();
           isRecording = true;
           micBtn.classList.add('bg-red-500', 'animate-pulse');
