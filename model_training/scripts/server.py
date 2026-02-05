@@ -20,7 +20,7 @@ import re
 DB_DIR = "../vector_store"
 EXAMPLES_DB_DIR = "../vector_store_examples"
 SQLITE_PATH = "aureeq.db"
-MODEL_NAME = "llama3.2:1b"  # Ultra-lightweight model for near-instant responses
+MODEL_NAME = "llama3.1:8b"  # Reverted to 8B for high intelligence and strict rule following
 
 app = FastAPI()
 
@@ -171,10 +171,10 @@ def get_llm():
         model=MODEL_NAME, 
         base_url=ollama_base_url,
         keep_alive="24h",
-        timeout=60, # 1B is fast, shouldn't ever take more than 60s
-        num_ctx=2048, # Further reduced context for maximum speed
-        temperature=0.7,
-        num_thread=8, # More threads for faster processing
+        timeout=300, # Increased timeout for the larger 8B model
+        num_ctx=4096,
+        temperature=0.3, # Lower temperature for higher factual accuracy (less hallucination)
+        num_thread=8,
         stop=["\n\nUser:", "USER:", "User:"]
     )
 
