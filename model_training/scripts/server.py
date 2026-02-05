@@ -1,13 +1,12 @@
 import os
 import json
+import sys
 from fastapi import FastAPI, HTTPException, Body, Request
 from fastapi.responses import StreamingResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from langchain_ollama import ChatOllama, OllamaEmbeddings
 from langchain_chroma import Chroma
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
 import edge_tts
 import asyncio
 import uuid
@@ -20,7 +19,7 @@ import re
 DB_DIR = "../vector_store"
 EXAMPLES_DB_DIR = "../vector_store_examples"
 SQLITE_PATH = "aureeq.db"
-MODEL_NAME = "llama3.1:8b" 
+MODEL_NAME = "llama3.2:1b" 
 
 app = FastAPI()
 
@@ -31,6 +30,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+def log(msg):
+    print(msg)
+    sys.stdout.flush()
 
 def parse_menu_to_json(text):
     """Parses markdown menu into a structured JSON tree."""
@@ -67,19 +70,19 @@ def parse_menu_to_json(text):
     return json.dumps(menu, indent=2, ensure_ascii=False)
 
 # 1. Setup Brain
-print("Loading Menu Data...")
+log("Loading Menu Data...")
 try:
     MENU_PATH = os.path.join(os.path.dirname(__file__), "../data/carnivore_menu.txt")
     with open(MENU_PATH, "r", encoding="utf-8") as f:
         raw_content = f.read()
         FULL_MENU_CONTEXT = parse_menu_to_json(raw_content)
-    print("Full Menu Parsed Successfully!")
+    log("Full Menu Parsed Successfully!")
 except Exception as e:
-    print(f"Error loading menu: {e}")
+    log(f"Error loading menu: {e}")
     FULL_MENU_CONTEXT = "Menu data unavailable."
 
 # Load Ingredients Data
-print("Loading Ingredients Data...")
+log("Loading Ingredients Data...")
 try:
     INGREDIENTS_PATH = os.path.join(os.path.dirname(__file__), "../data/ingredients.txt")
     if os.path.exists(INGREDIENTS_PATH):
@@ -87,47 +90,52 @@ try:
             content = f.read()
             content = re.sub(r'\n\s*\n', '\n\n', content)
             FULL_MENU_CONTEXT += "\n\nINGREDIENTS DATA:\n" + content
-        print("Ingredients Loaded Successfully!")
+        log("Ingredients Loaded Successfully!")
 except Exception as e:
-    print(f"Error loading ingredients: {e}")
+    log(f"Error loading ingredients: {e}")
 
 # Load Sales Examples Vector Store
-print("Loading Sales Examples Vector Store...")
+log("Loading Sales Examples Vector Store...")
 try:
     ollama_base_url = os.getenv("OLLAMA_HOST", "http://localhost:11434")
     embeddings = OllamaEmbeddings(model="nomic-embed-text", base_url=ollama_base_url)
     if os.path.exists(EXAMPLES_DB_DIR):
         example_store = Chroma(persist_directory=EXAMPLES_DB_DIR, embedding_function=embeddings)
-        print(f"Sales Examples Store Loaded")
+        log(f"Sales Examples Store Loaded")
     else:
-        print("Sales Examples Store NOT FOUND.")
+        log("Sales Examples Store NOT FOUND.")
         example_store = None
 except Exception as e:
-    print(f"Error loading Example Store: {e}")
+    log(f"Error loading Example Store: {e}")
     example_store = None
 
 # Startup Connectivity Check
 async def verify_models(retries=5):
     ollama_url = os.getenv('OLLAMA_HOST', 'http://localhost:11434')
     import httpx
-    print(f"Checking Ollama at {ollama_url}")
+    log(f"Checking Ollama at {ollama_url}")
     for i in range(retries):
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.get(ollama_url)
                 if resp.status_code == 200:
-                    print("✅ Ollama Service: Online")
+                    log("✅ Ollama Service: Online")
                     list_resp = await client.get(f"{ollama_url}/api/tags")
                     models = [m['name'] for m in list_resp.json().get('models', [])]
                     for required in [MODEL_NAME, "nomic-embed-text:latest"]:
-                        if not any(required.split(':')[0] in m for m in models):
-                            print(f"⚠️ Model MISSING: {required}")
-                            await client.post(f"{ollama_url}/api/pull", json={"name": required}, timeout=1.0)
+                        found = False
+                        for m in models:
+                            if required.split(':')[0] in m:
+                                found = True
+                                break
+                        if not found:
+                             log(f"⚠️ Model MISSING: {required}")
+                             # Note: pulling is background task
                         else:
-                            print(f"✅ Model READY: {required}")
+                            log(f"✅ Model READY: {required}")
                     return True
         except Exception as e:
-            print(f"❌ Connection Attempt {i+1} Failed: {str(e)[:50]}")
+            log(f"❌ Connection Attempt {i+1} Failed: {str(e)[:50]}")
             await asyncio.sleep(5)
     return False
 
@@ -144,8 +152,7 @@ def get_llm():
         timeout=600,
         num_ctx=4096,
         temperature=0.3,
-        num_thread=8,
-        stop=["\n\nUser:", "USER:", "User:"]
+        num_thread=8
     )
 
 class ChatRequest(BaseModel):
@@ -169,7 +176,7 @@ def sync_user(email: str, name: str = None, preferences: str = None):
         else:
             cursor.execute("INSERT INTO users (email, name, preferences) VALUES (?, ?, ?)", (email, name or "Guest", preferences))
         conn.commit()
-    except Exception as e: print(f"DB Error: {e}")
+    except Exception as e: log(f"DB Error: {e}")
     finally: conn.close()
 
 def save_order(user_id: str, items: list, total_price: float):
@@ -183,7 +190,7 @@ def save_order(user_id: str, items: list, total_price: float):
         conn.commit()
         return order_id
     except Exception as e:
-        print(f"DB Error (save_order): {e}")
+        log(f"DB Error (save_order): {e}")
         return None
     finally: conn.close()
 
@@ -191,43 +198,34 @@ def save_order(user_id: str, items: list, total_price: float):
 
 SYSTEM_PROMPT_TEMPLATE = """You are Aureeq, the formal and confident personal assistant for IYI restaurant.
 
-STRICT COMPLIANCE RULES - FOLLOW EXACTLY:
-1. TONE: Be formal, confident, and precise. Avoid being overly apologetic.
-2. GREETINGS: Always respond with a formal "Hello" or "Hi" when the user greets you.
-3. RECOMMENDATIONS: Always recommend a specific item from the IYI menu in every response to guide the user's choice.
-4. APOLOGIES: NEVER say "sorry" or "I apologize" for normal conversation. ONLY use a polite refusal for non-food or off-menu requests as specified below.
-5. NON-FOOD ITEMS: If the user asks for anything not related to food or IYI, say: "I can't assist you with this. However, I highly recommend our [Dish Name] from the IYI menu."
-6. OFF-MENU FOOD: If the user asks for a food item not found in the MENU DATA, say: "IYI doesn't offer it right now but you can have other options from our menu," and then immediately recommend a similar item from our actual menu.
-7. RESTAURANT NAME: Only say "IYI" - never "IYI Dining", "Kemat Consulting", or "Izmir Delights".
-8. MENU DATA: Copy dish names, prices, and descriptions EXACTLY from the provided MENU DATA - word for word.
-9. ORDERING: Do NOT append an order tag during initial recommendations. ONLY append the [ORDER: Exact Dish Name | Price] tag when the user explicitly: (a) asks to 'add to cart', (b) says 'lets continue with [dish]', or (c) says 'yes' to your offer of adding that specific dish to their cart. You may ask 'Would you like to add this [dish] to your cart?' if they seem interested, but only show the tag AFTER they confirm with a 'yes'.
-10. NO MARKDOWN: Use plain text only. Do NOT use **bold** or *italics*.
+STRICT COMPLIANCE RULES:
+1. TONE: Formal, confident, and precise.
+2. GREETINGS: Respond with "Hello" or "Hi" when the user greets you.
+3. RECOMMENDATIONS: Always recommend an item from the IYI menu in every response.
+4. APOLOGIES: Avoid saying "sorry". Use polite refusal for off-menu items.
+5. NON-FOOD ITEMS: If asked for non-food, say: "I can't assist you with this. However, I highly recommend our [Dish Name] from the IYI menu."
+6. OFF-MENU FOOD: If asked for food not on menu, say: "IYI doesn't offer it right now but you can have other options from our menu. I recommend our [Similar Dish]!"
+7. RESTAURANT NAME: Only say "IYI".
+8. MENU DATA: Use the provided JSON to answer precisely.
+9. ORDERING: ONLY append [ORDER: Item | Price] when the user explicitly confirms they want to add to cart or says "yes" to your specific offer. Do not automate this.
+10. NO MARKDOWN: Plain text only.
 
-EXAMPLES - COPY THIS EXACT FORMAT:
+EXAMPLES:
 {examples}
 
-MENU DATA (Your ONLY source - copy EXACTLY):
+MENU DATA:
 {context}
 
 USER INFO:
-{user_info}
-
-REMEMBER: No casual apologies. Be formal, always recommend, and guide the guest to IYI's offerings."""
+{user_info}"""
 
 async def get_relevant_examples_async(query: str, k: int = 3):
     if not example_store: return ""
     try:
-        import concurrent.futures
-        loop = asyncio.get_event_loop()
-        with concurrent.futures.ThreadPoolExecutor() as pool:
-             try:
-                 results = await asyncio.wait_for(loop.run_in_executor(pool, lambda: example_store.similarity_search(query, k=k)), timeout=10.0)
-                 return "\n\n".join([doc.metadata.get("full_example", doc.page_content) for doc in results]).strip()
-             except asyncio.TimeoutError:
-                 print("⚠️ RAG Timeout")
-                 return ""
+        results = await asyncio.to_thread(example_store.similarity_search, query, k=k)
+        return "\n\n".join([doc.metadata.get("full_example", doc.page_content) for doc in results]).strip()
     except Exception as e:
-        print(f"ERROR RAG: {e}")
+        log(f"ERROR RAG: {e}")
         return ""
 
 # --- API Endpoints ---
@@ -235,25 +233,12 @@ async def get_relevant_examples_async(query: str, k: int = 3):
 @app.post("/api/products/search")
 async def search_products(payload: dict = Body(...)):
     query = payload.get("query", "").lower()
-    print(f"DEBUG: Product search for: {query}")
-    if not query: return {"results": []}
-    
+    log(f"DEBUG: Product search: {query}")
     results = []
-    # Search in main menu
-    lines = FULL_MENU_CONTEXT.split('\n')
+    lines = FULL_MENU_CONTEXT.replace('{', '').replace('}', '').replace('"', '').split('\n')
     for line in lines:
-        if query in line.lower() and ('£' in line or '€' in line or '$' in line):
-             results.append({"content": line, "metadata": {"source": "menu"}})
-    
-    # Also search in ingredients if relevant
-    if not results:
-        if "INGREDIENTS DATA:" in FULL_MENU_CONTEXT:
-            ing_data = FULL_MENU_CONTEXT.split("INGREDIENTS DATA:")[1]
-            for section in ing_data.split('\n\n'):
-                if query in section.lower():
-                    results.append({"content": section.strip(), "metadata": {"source": "ingredients"}})
-
-    print(f"DEBUG: Found {len(results)} matches")
+        if query in line.lower() and ('£' in line or '€' in line or ':' in line):
+             results.append({"content": line.strip(), "metadata": {}})
     return {"results": results[:5]}
 
 @app.post("/api/memory/search")
@@ -262,7 +247,7 @@ async def search_memory(payload: dict = Body(...)):
 
 @app.get("/api/dataHandler")
 async def data_handler(type: str, user_id: str = None):
-    print(f"DEBUG: Data handler request: {type} for {user_id}")
+    log(f"DEBUG: Data handler: {type} for {user_id}")
     if type == "orders" and user_id:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -271,21 +256,21 @@ async def data_handler(type: str, user_id: str = None):
             orders = cursor.fetchall()
             order_list = [dict(o) for o in orders]
             return {
-                "results": [{"content": f"Order from {o['created_at']}: {o['items']}", "metadata": {}} for o in order_list],
+                "results": [{"content": f"Past order: {o['items']}", "metadata": {}} for o in order_list],
                 "orders": order_list
             }
         finally: conn.close()
-    return {"results": [], "orders": [], "error": "Invalid request"}
+    return {"results": [], "orders": []}
 
 @app.post("/api/chat")
 async def chat_endpoint(request: ChatRequest):
     user_query = request.message
-    print(f"--- Chat Request: {user_query[:50]}... ---")
+    log(f"--- Chat Request: {user_query} ---")
 
     async def chat_generator():
-        print("DEBUG: Chat generator started")
-        # Pulse 1: Immediate non-empty whitespace to tickle the frontend stream
-        yield "\n" 
+        log("DEBUG: Chat generator EXECUTION START")
+        # Pulse 1: visible space
+        yield " " 
         
         try:
             name, email, user_info_str = "Guest", "", ""
@@ -295,82 +280,101 @@ async def chat_endpoint(request: ChatRequest):
                 if email: sync_user(email, name)
                 user_info_str = f"Name: {name}\nEmail: {email}\nPreferences: {request.user_metadata.get('preferences', '')}\n"
 
-            print("DEBUG: Gathering context...")
+            log("DEBUG: Getting examples...")
             relevant_examples = await get_relevant_examples_async(user_query, k=3)
-            yield " " # Pulse 2 (keep connection alive during LLM prep)
+            yield " " # Pulse 2
 
             user_query_lower = user_query.lower()
             NON_FOOD_KEYWORDS = ["weather", "news", "coding", "programming", "joke", "politics"]
             if any(word in user_query_lower for word in NON_FOOD_KEYWORDS):
-                 print("DEBUG: Guardrail: Non-food item detected")
+                 log("DEBUG: Guardrail Hit")
                  yield "I can't assist you with this. However, I highly recommend our Lamb Chops from the IYI menu."
                  return
 
-            BANNED_ITEMS = {"sushi": "Lamb Chops", "pizza": "Lahmacun", "burger": "Chicken Adana"}
-            for item, pivot in BANNED_ITEMS.items():
-                if item in user_query_lower:
-                    print(f"DEBUG: Guardrail: Banned item {item} detected")
-                    yield f"IYI doesn't offer {item} right now but you can have other options from our menu. I recommend our {pivot}!"
-                    return
-
-            # Constructing cleaner messages for Ollama
+            final_system = SYSTEM_PROMPT_TEMPLATE.replace("{context}", FULL_MENU_CONTEXT)\
+                                               .replace("{examples}", relevant_examples or "No examples available.")\
+                                               .replace("{user_info}", user_info_str)
+            
             messages = [
-                ("system", SYSTEM_PROMPT_TEMPLATE.replace("{context}", FULL_MENU_CONTEXT)
-                                               .replace("{examples}", relevant_examples or "No examples available.")
-                                               .replace("{user_info}", user_info_str)),
-                ("user", user_query)
+                {"role": "system", "content": final_system},
+                {"role": "user", "content": user_query}
             ]
             
-            print(f"DEBUG: Invoking LLM: {MODEL_NAME}")
-            llm = get_llm()
-            has_started = False
-            async for chunk in llm.astream(messages):
-                content = getattr(chunk, 'content', chunk) if not isinstance(chunk, str) else chunk
-                if content:
-                    if not has_started:
-                        print("DEBUG: LLM Streaming started")
-                        has_started = True
-                    yield content
+            log(f"DEBUG: Invoking Ollama directly for robustness...")
+            import httpx
+            ollama_url = os.getenv('OLLAMA_HOST', 'http://localhost:11434')
             
-            if not has_started:
-                 print("ERROR: LLM yielded no tokens")
-                 yield "\n[System: The brain is calculating. Please try saying 'Hello' to wake me up!]"
+            async with httpx.AsyncClient(timeout=600.0) as client:
+                async with client.stream("POST", f"{ollama_url}/api/chat", json={
+                    "model": MODEL_NAME,
+                    "messages": messages,
+                    "stream": True,
+                    "options": {"temperature": 0.3}
+                }) as response:
+                    if response.status_code != 200:
+                         log(f"ERROR: Ollama returned {response.status_code}")
+                         yield f"\n[Brain error: {response.status_code}]"
+                         return
+                    
+                    has_tokens = False
+                    async for line in response.aiter_lines():
+                        if not line: continue
+                        try:
+                            # log(f"DEBUG: Ollama line: {line[:100]}") # Keep it reasonably short
+                            chunk = json.loads(line)
+                            if "error" in chunk:
+                                log(f"OLLAMA ERROR: {chunk['error']}")
+                                yield f"\n[Brain error: {chunk['error']}]"
+                                break
+                            
+                            if "message" in chunk and "content" in chunk["message"]:
+                                content = chunk["message"]["content"]
+                                if content:
+                                    if not has_tokens:
+                                        log("DEBUG: First REAL token received!")
+                                        has_tokens = True
+                                    yield content
+                            if chunk.get("done"):
+                                log(f"DEBUG: Ollama done. Total tokens received: {has_tokens}")
+                                break
+                        except Exception as e:
+                            log(f"Chunk error: {e} | Line: {line}")
+                    
+                    if not has_tokens:
+                         log("ERROR: No content received from Ollama")
+                         yield "\n[The brain is warming up. Please try again in 30 seconds.]"
 
         except Exception as e:
-            print(f"CRITICAL STREAM ERROR: {str(e)}")
+            log(f"CRITICAL ERROR: {str(e)}")
             traceback.print_exc()
-            yield f"\n\n[Connectivity issue: {str(e)[:40]}]"
+            yield f"\n[Connection error: {str(e)[:40]}]"
         finally:
-            print("--- DEBUG: Stream Closed ---")
+            log("--- DEBUG: Chat generator CLOSED ---")
 
-    return StreamingResponse(
-        chat_generator(), 
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
-    )
+    return StreamingResponse(chat_generator(), media_type="text/plain")
 
 @app.get("/api/welcome")
 async def welcome_endpoint(user_id: str = None, name: str = None):
     welcome_text = "Hello I am AUREEQ your personal assistant, How may I help you today?"
-    audio_url = None
+    audio_filename = f"welcome_{uuid.uuid4()}.mp3"
+    audio_path = os.path.join(DATA_DIR, audio_filename)
     try:
-        audio_filename = f"welcome_{uuid.uuid4()}.mp3"
-        audio_path = os.path.join(DATA_DIR, audio_filename)
         communicate = edge_tts.Communicate(welcome_text, "en-US-GuyNeural")
         await communicate.save(audio_path)
-        audio_url = f"/audio/{audio_filename}"
-    except Exception: pass
-    return {"response": welcome_text, "audio_url": audio_url}
+        return {"response": welcome_text, "audio_url": f"/audio/{audio_filename}"}
+    except Exception:
+        return {"response": welcome_text, "audio_url": None}
 
 @app.post("/api/tts")
 async def tts_endpoint(text: str = Body(..., embed=True)):
+    audio_filename = f"tts_{uuid.uuid4()}.mp3"
+    audio_path = os.path.join(DATA_DIR, audio_filename)
     try:
-        audio_filename = f"tts_{uuid.uuid4()}.mp3"
-        audio_path = os.path.join(DATA_DIR, audio_filename)
         communicate = edge_tts.Communicate(text, "en-US-GuyNeural")
         await communicate.save(audio_path)
         return {"audio_url": f"/audio/{audio_filename}"}
-    except Exception: return {"audio_url": None}
+    except Exception:
+        return {"audio_url": None}
 
 @app.post("/api/order")
 async def create_order(request: dict):
