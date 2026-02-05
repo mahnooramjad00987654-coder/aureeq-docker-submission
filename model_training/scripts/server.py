@@ -196,28 +196,37 @@ def save_order(user_id: str, items: list, total_price: float):
 
 # --- Chat Logic ---
 
-SYSTEM_PROMPT_TEMPLATE = """You are Aureeq, the formal and confident personal assistant for IYI restaurant.
+SYSTEM_PROMPT_TEMPLATE = """You are Aureeq, the formal assistant for IYI restaurant. 
 
-STRICT COMPLIANCE RULES:
-1. TONE: Formal, confident, and precise.
-2. GREETINGS: Respond with "Hello" or "Hi" when the user greets you.
-3. RECOMMENDATIONS: Always recommend an item from the IYI menu in every response.
-4. APOLOGIES: Avoid saying "sorry". Use polite refusal for off-menu items.
-5. NON-FOOD ITEMS: If asked for non-food, say: "I can't assist you with this. However, I highly recommend our [Dish Name] from the IYI menu."
-6. OFF-MENU FOOD: If asked for food not on menu, say: "IYI doesn't offer it right now but you can have other options from our menu. I recommend our [Similar Dish]!"
-7. RESTAURANT NAME: Only say "IYI".
-8. MENU DATA: Use the provided JSON to answer precisely.
-9. ORDERING: ONLY append [ORDER: Item | Price] when the user explicitly confirms they want to add to cart or says "yes" to your specific offer. Do not automate this.
-10. NO MARKDOWN: Plain text only.
+STRICT RULES:
+1. **CONCISE**: Every response MUST be 1-2 sentences maximum.
+2. **PERSONAL**: Always call the user by their name: {user_name}. Use "Hello {user_name}" or "Hi {user_name}".
+3. **EXACT**: Copy dish names, prices, and descriptions exactly from MENU DATA.
+4. **RECOMMEND**: Always suggest one dish from the menu in every response.
+5. **TAG**: ONLY append [ORDER: Exact Dish Name | Price] if the user says "add to cart" or "yes" to your offer.
+6. **NON-FOOD**: If asked about anything not related to IYI or food, ONLY say: "I am only trained on your food selection. However, I highly recommend our [Dish Name] from the IYI menu."
+7. **OFF-MENU**: If a food item is not in the list, say: "IYI doesn't offer it right now but you can have other options. I recommend our [Similar Dish]!"
 
-EXAMPLES:
-{examples}
+FEW-SHOT EXAMPLES:
+User: hello
+Aureeq: Hello {user_name}, I am Aureeq from IYI. I highly recommend our Ranjha Gosht (£19.99) which is a rich lamb curry.
+
+User: add to cart lamb chops
+Aureeq: Certainly {user_name}, I have added the Lamb Chops (£25.99) to your cart. [ORDER: Lamb Chops | £25.99]
+
+User: do you have pizza?
+Aureeq: IYI doesn't offer it right now but you can have other options. I recommend our Lahmacun (£6.99) which is a crisp flatbread with minced meat.
+
+User: what is the weather?
+Aureeq: I am only trained on your food selection. However, I highly recommend our Chicken Adana Kebab (£15.99) from the IYI menu.
 
 MENU DATA:
 {context}
 
 USER INFO:
-{user_info}"""
+Name: {user_name}
+Preferences: {user_preferences}
+"""
 
 async def get_relevant_examples_async(query: str, k: int = 3):
     if not example_store: return ""
@@ -273,28 +282,32 @@ async def chat_endpoint(request: ChatRequest):
         yield " " 
         
         try:
-            name, email, user_info_str = "Guest", "", ""
+            name = "Guest"
+            preferences = ""
             if request.user_metadata:
                 name = request.user_metadata.get("name", "Guest")
+                preferences = request.user_metadata.get("preferences", "")
                 email = request.user_metadata.get("email", "")
-                if email: sync_user(email, name)
-                user_info_str = f"Name: {name}\nEmail: {email}\nPreferences: {request.user_metadata.get('preferences', '')}\n"
+                if email: sync_user(email, name, preferences)
 
             log("DEBUG: Getting examples...")
-            relevant_examples = await get_relevant_examples_async(user_query, k=3)
+            relevant_examples = await get_relevant_examples_async(user_query, k=2)
             yield " " # Pulse 2
 
             user_query_lower = user_query.lower()
             NON_FOOD_KEYWORDS = ["weather", "news", "coding", "programming", "joke", "politics"]
             if any(word in user_query_lower for word in NON_FOOD_KEYWORDS):
                  log("DEBUG: Guardrail Hit")
-                 yield "I can't assist you with this. However, I highly recommend our Lamb Chops from the IYI menu."
+                 yield "I am only trained on your food selection. However, I highly recommend our Lamb Chops (£25.99) from the IYI menu."
                  return
 
             final_system = SYSTEM_PROMPT_TEMPLATE.replace("{context}", FULL_MENU_CONTEXT)\
-                                               .replace("{examples}", relevant_examples or "No examples available.")\
-                                               .replace("{user_info}", user_info_str)
+                                               .replace("{user_name}", name)\
+                                               .replace("{user_preferences}", preferences or "None")
             
+            if relevant_examples:
+                final_system += f"\n\nFAVORITE EXAMPLES:\n{relevant_examples}"
+
             messages = [
                 {"role": "system", "content": final_system},
                 {"role": "user", "content": user_query}
