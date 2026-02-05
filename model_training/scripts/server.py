@@ -171,10 +171,10 @@ def get_llm():
         model=MODEL_NAME, 
         base_url=ollama_base_url,
         keep_alive="24h",
-        timeout=300, # Increased timeout for the larger 8B model
+        timeout=600, # 10 min timeout for 8B
         num_ctx=4096,
-        temperature=0.3, # Lower temperature for higher factual accuracy (less hallucination)
-        num_thread=8,
+        temperature=0.3,
+        # num_thread=8, # Removing explicit thread count to let Ollama auto-optimize
         stop=["\n\nUser:", "USER:", "User:"]
     )
 
@@ -407,7 +407,7 @@ async def chat_endpoint(request: ChatRequest):
     
     # Stream the response content directly to the client
     async def chat_generator():
-        # NOTE: Removed initial space yield to avoid empty display bubbles in frontend trim
+        yield " " # Critical: Keep connection alive during slow 8B model startup
         
         # 1. RETRIEVE EXAMPLES (with timeout safety)
         print("Retrieving relevant sales examples...")
